@@ -4,6 +4,17 @@ Scripts for testing bootc installation onto a RAID 1 array with multiple ESP
 (EFI System Partition) partitions -- one per disk -- so that any disk can boot
 independently if another fails.
 
+## Copr Repositories
+
+The container image built by the Containerfile uses two Copr repositories:
+
+- **[packit/bootc-dev-bootc-1911](https://copr.fedorainfracloud.org/coprs/packit/bootc-dev-bootc-1911/)** --
+  Provides an updated `bootc` package built from
+  [PR #1911](https://github.com/containers/bootc/pull/1911). This PR is 90% functional. Some edge case bugs are being worked on.
+
+- **[@CoreOS/continuous](https://copr.fedorainfracloud.org/coprs/g/CoreOS/continuous/)** --
+  Provides `bootupd` (pinned to version `0.2.32.41.gb788553`). This is the RPM build of the main branch that has the necessary changes to support bootc installing to RAID devices.
+
 ## Prerequisites
 
 - podman
