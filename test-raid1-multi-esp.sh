@@ -127,10 +127,29 @@ for i in "${!LOOPS[@]}"; do
 done
 
 ########################################################################
+# Step 5: Verify RAID superblocks and tear down for VM boot
+########################################################################
+echo "==> Verifying RAID superblocks on member devices"
+for loop in "${LOOPS[@]}"; do
+    echo "--- ${loop}p2:"
+    mdadm --examine "${loop}p2" || { echo "    FAIL: no valid superblock"; fail=1; }
+done
+
+echo "==> Tearing down RAID and loop devices (disk images are preserved)"
+umount "$MOUNTPOINT" 2>/dev/null || true
+rmdir "$MOUNTPOINT" 2>/dev/null || true
+mdadm --stop "$MD_DEV"
+for loop in "${LOOPS[@]}"; do
+    losetup -d "$loop"
+done
+sync
+
+########################################################################
 # Result
 ########################################################################
 if [ "$fail" -eq 0 ]; then
     echo "==> SUCCESS: All ${NUM_DISKS} ESP partitions have bootloader files"
+    echo "==> Disk images ready in ${DISK_DIR}. Run ./boot-vm.sh to test."
 else
     echo "==> FAILURE: One or more ESP partitions are missing bootloader files"
     exit 1
