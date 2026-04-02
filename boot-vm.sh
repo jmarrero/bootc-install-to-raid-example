@@ -40,19 +40,38 @@ fi
 ########################################################################
 # Locate OVMF firmware
 ########################################################################
-OVMF=""
+OVMF_CODE=""
 for candidate in \
     /usr/share/edk2/ovmf/OVMF_CODE.fd \
     /usr/share/OVMF/OVMF_CODE.fd \
     /usr/share/edk2/x64/OVMF_CODE.fd; do
     if [ -f "$candidate" ]; then
-        OVMF="$candidate"
+        OVMF_CODE="$candidate"
         break
     fi
 done
-if [ -z "$OVMF" ]; then
+if [ -z "$OVMF_CODE" ]; then
     echo "Error: OVMF firmware not found. Install edk2-ovmf." >&2
     exit 1
+fi
+
+OVMF_VARS_COPY="${DISK_DIR}/OVMF_VARS.fd"
+if [ ! -f "$OVMF_VARS_COPY" ]; then
+    OVMF_VARS_ORIG=""
+    for candidate in \
+        /usr/share/edk2/ovmf/OVMF_VARS.fd \
+        /usr/share/OVMF/OVMF_VARS.fd \
+        /usr/share/edk2/x64/OVMF_VARS.fd; do
+        if [ -f "$candidate" ]; then
+            OVMF_VARS_ORIG="$candidate"
+            break
+        fi
+    done
+    if [ -z "$OVMF_VARS_ORIG" ]; then
+        echo "Error: OVMF_VARS firmware not found. Install edk2-ovmf." >&2
+        exit 1
+    fi
+    cp "$OVMF_VARS_ORIG" "$OVMF_VARS_COPY"
 fi
 
 ########################################################################
@@ -81,6 +100,7 @@ qemu-system-x86_64 \
     -machine q35,accel=kvm \
     -cpu host \
     -m 2048 \
-    -drive "if=pflash,format=raw,readonly=on,file=${OVMF}" \
+    -drive "if=pflash,format=raw,readonly=on,file=${OVMF_CODE}" \
+    -drive "if=pflash,format=raw,file=${OVMF_VARS_COPY}" \
     "${DRIVE_ARGS[@]}" \
     -nographic

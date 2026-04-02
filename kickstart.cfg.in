@@ -1,0 +1,23 @@
+text
+lang en_US.UTF-8
+keyboard us
+timezone UTC --utc
+rootpw --plaintext changeme
+network --bootproto=dhcp --device=link --activate
+
+zerombr
+clearpart --all --initlabel --disklabel=gpt --drives=vda,vdb,vdc
+
+part /boot/efi  --fstype=efi --size=600 --ondisk=vda
+part /boot/efi2 --fstype=efi --size=600 --ondisk=vdb --fsoptions="noauto"
+part /boot/efi3 --fstype=efi --size=600 --ondisk=vdc --fsoptions="noauto"
+
+part raid.01 --size=1 --grow --ondisk=vda
+part raid.02 --size=1 --grow --ondisk=vdb
+part raid.03 --size=1 --grow --ondisk=vdc
+
+raid / --device=md0 --fstype=xfs --level=1 raid.01 raid.02 raid.03
+
+ostreecontainer --no-signature-verification --url=@@IMAGE_URL@@
+
+poweroff
