@@ -93,6 +93,11 @@ rm -rf "$KS_DIR"
 
 ########################################################################
 # Step 5: Locate OVMF firmware
+# QEMU needs UEFI firmware (OVMF) to boot in UEFI mode, which is
+# required for EFI System Partitions. The install path varies by
+# distro, so we search several common locations. OVMF_CODE is the
+# read-only firmware and OVMF_VARS is a writable copy of the EFI
+# variable store where boot entries are saved.
 ########################################################################
 OVMF_CODE=""
 for candidate in \
