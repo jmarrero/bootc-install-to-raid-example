@@ -66,6 +66,9 @@ fi
 
 ########################################################################
 # Step 3: Extract kernel and initrd from ISO
+# QEMU's -kernel/-initrd flags boot the kernel directly, bypassing the
+# ISO's GRUB menu. This lets us pass -append with kernel command-line
+# args (inst.ks=, inst.stage2=) for fully unattended Anaconda install.
 ########################################################################
 echo "==> Extracting kernel and initrd from boot ISO"
 ISO_MNT=$(mktemp -d "${DISK_DIR}/iso-mnt.XXXXXX")
