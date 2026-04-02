@@ -12,7 +12,7 @@
 #   BASE_IMAGE          FROM image for the Containerfile (optional)
 #                       Defaults to quay.io/centos-bootc/centos-bootc:stream10
 #
-# Prerequisites: podman, qemu-system-x86_64, edk2-ovmf, curl, python3
+# Prerequisites: podman, qemu-system-x86_64, edk2-ovmf, curl, cpio
 # Must be run as root.
 set -euo pipefail
 
@@ -76,27 +76,23 @@ umount "$ISO_MNT"
 rmdir "$ISO_MNT"
 
 ########################################################################
-# Step 4: Generate kickstart from template
+# Step 4: Generate kickstart and pack into CPIO initrd
 ########################################################################
 echo "==> Generating kickstart"
-KS_DIR=$(mktemp -d "${DISK_DIR}/ks-serve.XXXXXX")
+KS_DIR=$(mktemp -d "${DISK_DIR}/ks-initrd.XXXXXX")
 sed "s|@@IMAGE_URL@@|${IMAGE_URL}|g" \
     "${SCRIPT_DIR}/kickstart.cfg.in" > "${KS_DIR}/kickstart.cfg"
 
 echo "--- Kickstart contents:"
 cat "${KS_DIR}/kickstart.cfg"
 
-########################################################################
-# Step 5: Start temporary HTTP server for kickstart
-########################################################################
-echo "==> Starting HTTP server on port ${KS_PORT}"
-python3 -m http.server "$KS_PORT" --directory "$KS_DIR" &
-HTTP_PID=$!
-# shellcheck disable=SC2064
-trap "kill $HTTP_PID 2>/dev/null || true; rm -rf '$KS_DIR'" EXIT
+echo "==> Packing kickstart into CPIO initrd"
+KS_INITRD="${DISK_DIR}/anaconda-ks-initrd.img"
+( cd "$KS_DIR" && echo kickstart.cfg | cpio -o -H newc ) > "$KS_INITRD"
+rm -rf "$KS_DIR"
 
 ########################################################################
-# Step 6: Locate OVMF firmware
+# Step 5: Locate OVMF firmware
 ########################################################################
 OVMF_CODE=""
 for candidate in \
@@ -132,7 +128,7 @@ OVMF_VARS_COPY="${DISK_DIR}/OVMF_VARS.fd"
 cp "$OVMF_VARS_ORIG" "$OVMF_VARS_COPY"
 
 ########################################################################
-# Step 7: Run Anaconda in QEMU
+# Step 6: Run Anaconda in QEMU
 ########################################################################
 echo "==> Running Anaconda installer in QEMU"
 timeout 1800 qemu-system-x86_64 \
@@ -148,17 +144,13 @@ timeout 1800 qemu-system-x86_64 \
     -nic user,model=virtio-net-pci \
     -nographic \
     -kernel "${DISK_DIR}/anaconda-vmlinuz" \
-    -initrd "${DISK_DIR}/anaconda-initrd.img" \
-    -append "inst.stage2=cdrom inst.ks=http://10.0.2.2:${KS_PORT}/kickstart.cfg console=ttyS0 inst.notmux"
+    -initrd "${DISK_DIR}/anaconda-initrd.img,${KS_INITRD}" \
+    -append "inst.stage2=cdrom inst.ks=file:/kickstart.cfg console=ttyS0 inst.notmux"
 
 echo "==> Anaconda installation completed"
 
-# Clean up HTTP server (trap handles this, but be explicit)
-kill "$HTTP_PID" 2>/dev/null || true
-rm -rf "$KS_DIR"
-
 ########################################################################
-# Step 8: Verify every ESP has bootloader files
+# Step 7: Verify every ESP has bootloader files
 ########################################################################
 echo "==> Validating ESP partitions"
 ESP_MOUNT="/var/mnt/esp-check"

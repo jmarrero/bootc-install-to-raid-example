@@ -14,7 +14,6 @@ IMAGE="localhost/bootc-raid1-test"
 
 BOOT_ISO_URL="https://mirror.stream.centos.org/10-stream/BaseOS/x86_64/iso/CentOS-Stream-10-latest-x86_64-boot.iso"
 BOOT_ISO="${DISK_DIR}/CentOS-Stream-10-boot.iso"
-KS_PORT=8099
 
 # Tear down loop devices, RAID array, and disk images.
 cleanup() {
