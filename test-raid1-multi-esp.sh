@@ -89,9 +89,8 @@ sed "s|@@IMAGE_URL@@|${IMAGE_URL}|g" \
 echo "--- Kickstart contents:"
 cat "${KS_DIR}/kickstart.cfg"
 
-echo "==> Packing kickstart into CPIO initrd"
-KS_INITRD="${DISK_DIR}/anaconda-ks-initrd.img"
-( cd "$KS_DIR" && echo kickstart.cfg | cpio -o -H newc ) > "$KS_INITRD"
+echo "==> Appending kickstart to initrd as CPIO archive"
+( cd "$KS_DIR" && echo kickstart.cfg | cpio -o -H newc ) >> "${DISK_DIR}/anaconda-initrd.img"
 rm -rf "$KS_DIR"
 
 ########################################################################
@@ -139,7 +138,7 @@ cp "$OVMF_VARS_ORIG" "$OVMF_VARS_COPY"
 # Step 6: Run Anaconda in QEMU
 ########################################################################
 echo "==> Running Anaconda installer in QEMU"
-timeout 1800 qemu-system-x86_64 \
+qemu-system-x86_64 \
     -machine q35,accel=kvm \
     -cpu host \
     -m 4096 \
@@ -152,7 +151,7 @@ timeout 1800 qemu-system-x86_64 \
     -nic user,model=virtio-net-pci \
     -nographic \
     -kernel "${DISK_DIR}/anaconda-vmlinuz" \
-    -initrd "${DISK_DIR}/anaconda-initrd.img,${KS_INITRD}" \
+    -initrd "${DISK_DIR}/anaconda-initrd.img" \
     -append "inst.stage2=cdrom inst.ks=file:/kickstart.cfg console=ttyS0 inst.notmux"
 
 echo "==> Anaconda installation completed"

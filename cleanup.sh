@@ -29,5 +29,4 @@ cleanup
 # Clean up Anaconda artifacts
 rm -f "${DISK_DIR}/anaconda-vmlinuz"
 rm -f "${DISK_DIR}/anaconda-initrd.img"
-rm -f "${DISK_DIR}/anaconda-ks-initrd.img"
 rm -f "${DISK_DIR}/OVMF_VARS.fd"
