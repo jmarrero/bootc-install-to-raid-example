@@ -40,7 +40,7 @@ BASE_IMAGE="${2:-quay.io/centos-bootc/centos-bootc:stream10}"
 # Build and push the container image
 ########################################################################
 echo "==> Building ${IMAGE} from ${BASE_IMAGE}"
-podman build --build-arg "BASE_IMAGE=${BASE_IMAGE}" -t "$IMAGE" "$SCRIPT_DIR"
+podman build --no-cache --build-arg "BASE_IMAGE=${BASE_IMAGE}" -t "$IMAGE" "$SCRIPT_DIR"
 
 echo "==> Pushing ${IMAGE} to ${IMAGE_URL}"
 podman push "$IMAGE" "$IMAGE_URL"

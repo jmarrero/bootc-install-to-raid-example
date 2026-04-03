@@ -8,10 +8,24 @@ network --bootproto=dhcp --device=link --activate
 zerombr
 clearpart --all --initlabel --disklabel=gpt --drives=vda,vdb,vdc
 
+# One ESP per disk for boot redundancy. If any single disk fails, the
+# system can still boot from a surviving disk's ESP.
+#
+# With hardware RAID or Intel VROC/RST the firmware presents a single
+# virtual disk, so only one ESP is needed (the firmware handles disk
+# failover transparently). Multiple ESPs are a software RAID concern
+# because each physical disk must be independently bootable.
 part /boot/efi  --fstype=efi --size=600 --ondisk=vda
 part /boot/efi2 --fstype=efi --size=600 --ondisk=vdb --fsoptions="noauto"
 part /boot/efi3 --fstype=efi --size=600 --ondisk=vdc --fsoptions="noauto"
 
+# SOFTWARE RAID (mdraid) ONLY: Create a Linux software RAID 1 array
+# for the root filesystem across all three disks. Each disk contributes
+# a partition as a RAID member; mdadm assembles them into /dev/md/md0.
+#
+# Hardware RAID or Intel VROC/RST would not need explicit RAID setup in
+# the kickstart — the firmware presents a single virtual disk, and
+# standard 'part' commands work directly on it.
 part raid.01 --size=1 --grow --ondisk=vda
 part raid.02 --size=1 --grow --ondisk=vdb
 part raid.03 --size=1 --grow --ondisk=vdc
@@ -21,3 +35,117 @@ raid / --device=md0 --fstype=xfs --level=1 raid.01 raid.02 raid.03
 ostreecontainer --no-signature-verification --url=@@IMAGE_URL@@
 
 poweroff
+
+%pre --log=/tmp/ks-pre-bootc-update.log
+# Update bootc in the Anaconda installer environment to the version from
+# the Copr PR #1911 build, which has multi-ESP support. The stock bootc
+# in the boot ISO does not support installing bootloader files to
+# multiple ESPs. This %pre script runs in the installer environment
+# (not the target), so the updated bootc is used by the ostreecontainer
+# payload during installation.
+set -euxo pipefail
+
+cat >/etc/yum.repos.d/packit-bootc-pr.repo <<REPOEOF
+[copr:copr.fedorainfracloud.org:packit:bootc-dev-bootc-1911]
+name=Copr repo for bootc PR 1911
+baseurl=https://download.copr.fedorainfracloud.org/results/packit/bootc-dev-bootc-1911/centos-stream-\$releasever-\$basearch/
+type=rpm-md
+skip_if_unavailable=True
+gpgcheck=1
+gpgkey=https://download.copr.fedorainfracloud.org/results/packit/bootc-dev-bootc-1911/pubkey.gpg
+repo_gpgcheck=0
+enabled=1
+enabled_metadata=1
+REPOEOF
+
+dnf -y update bootc
+rm -f /etc/yum.repos.d/packit-bootc-pr.repo
+echo "==> bootc version in installer:"
+rpm -q bootc
+%end
+
+%pre-install
+# Create mount point directories for the extra ESPs.
+# Anaconda mounts the root FS at /mnt/sysimage before payload install,
+# but may not create subdirectory mount points for non-primary ESPs.
+mkdir -p /mnt/sysimage/boot/efi2
+mkdir -p /mnt/sysimage/boot/efi3
+%end
+
+%post --nochroot --log=/mnt/sysimage/var/log/ks-post-esp-copy.log
+# SOFTWARE RAID (mdraid) ONLY: Replicate bootloader to extra ESPs.
+#
+# Anaconda only installs the bootloader on the primary /boot/efi; the
+# secondary ESPs need identical content for boot redundancy. This is
+# only necessary with software RAID where each disk has its own ESP.
+#
+# With hardware RAID or Intel VROC/RST, there is a single virtual disk
+# with a single ESP, so no replication is needed.
+#
+# The extra ESPs have fsoptions="noauto" so Anaconda unmounts them before
+# %post runs. We mount them explicitly by device path here.
+set -euxo pipefail
+
+PRIMARY="/mnt/sysimage/boot/efi"
+
+# SOFTWARE RAID (mdraid) ONLY: Replace the stock grubx64.efi with the
+# rebuilt version from the container image that includes mdraid1x.
+#
+# Anaconda installs the bootloader from the boot ISO's packages, not
+# from the deployed container image. The container image has a custom
+# grubx64.efi with mdraid1x embedded (built via grub2-mkimage in the
+# Containerfile), but Anaconda overwrites it with the stock binary.
+# We copy the rebuilt binary from the deployed sysroot back to the ESP.
+SYSROOT="/mnt/sysimage/ostree/deploy/default/deploy"
+DEPLOY_DIR=$(ls -d ${SYSROOT}/*.0 2>/dev/null | head -1)
+if [ -n "$DEPLOY_DIR" ]; then
+    CUSTOM_GRUB=$(find "${DEPLOY_DIR}/usr/lib/efi/grub2" -name grubx64.efi -print -quit 2>/dev/null)
+    if [ -n "$CUSTOM_GRUB" ]; then
+        echo "==> Replacing stock grubx64.efi with custom build from container image"
+        echo "    Source: ${CUSTOM_GRUB} ($(stat -c%s "${CUSTOM_GRUB}") bytes)"
+        echo "    Target: ${PRIMARY}/EFI/centos/grubx64.efi ($(stat -c%s "${PRIMARY}/EFI/centos/grubx64.efi") bytes)"
+        cp "${CUSTOM_GRUB}" "${PRIMARY}/EFI/centos/grubx64.efi"
+    else
+        echo "WARNING: Could not find custom grubx64.efi in deployed container"
+    fi
+else
+    echo "WARNING: Could not find ostree deployment directory"
+fi
+
+# Fix BLS entry paths: bootc/ostree generates paths like
+#   linux /ostree/default-.../vmlinuz-...
+# assuming /boot is its own partition. In our layout /boot is a directory
+# on the root RAID filesystem, so GRUB's $root points at the root FS and
+# the kernel path must be /boot/ostree/... instead. Prepend /boot to the
+# linux and initrd paths in every BLS entry.
+BLS_DIR="/mnt/sysimage/boot/loader/entries"
+if [ -d "$BLS_DIR" ]; then
+    for entry in "$BLS_DIR"/*.conf; do
+        [ -f "$entry" ] || continue
+        echo "==> Fixing BLS entry paths in $(basename "$entry")"
+        sed -i \
+            -e 's|^linux /ostree/|linux /boot/ostree/|' \
+            -e 's|^initrd /ostree/|initrd /boot/ostree/|' \
+            "$entry"
+        echo "    Updated contents:"
+        cat "$entry"
+    done
+else
+    echo "WARNING: BLS directory $BLS_DIR not found"
+fi
+
+# vdb1 = efi2, vdc1 = efi3
+EXTRA_DEVS="/dev/vdb1 /dev/vdc1"
+
+for dev in $EXTRA_DEVS; do
+    mnt=$(mktemp -d /tmp/esp-copy.XXXXXX)
+    echo "==> Mounting ${dev} at ${mnt}"
+    mount "$dev" "$mnt"
+    echo "==> Copying EFI content from ${PRIMARY} to ${mnt}"
+    cp -a "${PRIMARY}/." "${mnt}/"
+    echo "==> Contents of ${dev}:"
+    ls -R "$mnt"
+    umount "$mnt"
+    rmdir "$mnt"
+done
+%end
