@@ -134,6 +134,33 @@ else
     echo "WARNING: BLS directory $BLS_DIR not found"
 fi
 
+# Fix fstab: Replace UUID-based ESP mounts with device paths.
+# Each disk has a different ESP UUID, so /boot/efi only mounts correctly
+# when booting from disk 1. Using device paths (/dev/vdX1) ensures the
+# correct ESP is mounted regardless of which disk the system boots from.
+# The secondary ESPs (efi2, efi3) remain noauto since they're only for
+# redundancy and are mounted by the %post script when needed.
+# The fstab is in the ostree deployment's /etc directory.
+SYSROOT="/mnt/sysimage/ostree/deploy/default/deploy"
+DEPLOY_DIR=$(ls -d ${SYSROOT}/*.0 2>/dev/null | head -1)
+if [ -n "$DEPLOY_DIR" ]; then
+    FSTAB="${DEPLOY_DIR}/etc/fstab"
+    if [ -f "$FSTAB" ]; then
+        echo "==> Fixing fstab ESP mounts to use device paths"
+        sed -i \
+            -e 's|^UUID=[A-F0-9-]*[ \t]*/boot/efi[ \t]*vfat.*$|/dev/vda1\t\t/boot/efi\t\tvfat\t defaults,uid=0,gid=0,umask=077,shortname=winnt\t0 2|' \
+            -e 's|^UUID=[A-F0-9-]*[ \t]*/boot/efi2[ \t]*vfat.*$|/dev/vdb1\t\t/boot/efi2\t\tvfat\t noauto\t\t0 2|' \
+            -e 's|^UUID=[A-F0-9-]*[ \t]*/boot/efi3[ \t]*vfat.*$|/dev/vdc1\t\t/boot/efi3\t\tvfat\t noauto\t\t0 2|' \
+            "$FSTAB"
+        echo "    Updated fstab contents:"
+        grep -E "(boot/efi|/dev/vd)" "$FSTAB"
+    else
+        echo "WARNING: fstab not found at $FSTAB"
+    fi
+else
+    echo "WARNING: Could not find ostree deployment directory"
+fi
+
 # vdb1 = efi2, vdc1 = efi3
 EXTRA_DEVS="/dev/vdb1 /dev/vdc1"
 
